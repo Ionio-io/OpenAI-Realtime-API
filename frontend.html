@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Realtime API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #messageLog { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+        #userInput { width: 100%; padding: 5px; margin-bottom: 10px; }
+        button { padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>OpenAI Realtime API Test</h1>
+    <div id="messageLog"></div>
+    <input type="text" id="userInput" placeholder="Type your message here...">
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        const socket = new WebSocket('ws://localhost:8000/ws/openai');
+        const messageLog = document.getElementById('messageLog');
+        const userInput = document.getElementById('userInput');
+
+        socket.onopen = function(e) {
+            addMessage('Connected to server');
+            // Initialize the conversation
+            socket.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                    modalities: ['text'],
+                    instructions: 'You are a helpful assistant.',
+                }
+            }));
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            addMessage('Received: ' + JSON.stringify(data, null, 2));
+        };
+
+        socket.onclose = function(event) {
+            addMessage('Disconnected from server');
+        };
+
+        socket.onerror = function(error) {
+            addMessage('Error: ' + error.message);
+        };
+
+        function sendMessage() {
+            const message = userInput.value.trim();
+            if (message) {
+                const event = {
+                    type: 'conversation.item.create',
+                    item: {
+                        type: 'message',
+                        role: 'user',
+                        content: [{
+                            type: 'input_text',
+                            text: message
+                        }]
+                    }
+                };
+                socket.send(JSON.stringify(event));
+                addMessage('Sent: ' + message);
+                userInput.value = '';
+
+                // Request a response
+                socket.send(JSON.stringify({ type: 'response.create' }));
+            }
+        }
+
+        function addMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messageLog.appendChild(messageElement);
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
