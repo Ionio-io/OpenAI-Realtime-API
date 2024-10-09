@@ -73,10 +73,23 @@
 
                     // Connect to FastAPI WebSocket
                     socket = new WebSocket('ws://localhost:8000/ws/audio');
-                    socket.onopen = () => log('WebSocket connection opened');
-                    socket.onclose = () => log('WebSocket connection closed');
+                    socket.onopen = () => {
+                        log('WebSocket connection opened');
+                        // Start sending audio data once the connection is open
+                        processor.connect(audioContext.destination);
+                    };
+                    socket.onclose = () => {
+                        log('WebSocket connection closed');
+                        // Stop processing audio when the connection is closed
+                        processor.disconnect();
+                    };
                     socket.onerror = (error) => log(`WebSocket error: ${error}`);
                     socket.onmessage = handleServerMessage;
+                })
+                .catch(error => {
+                    log(`Error accessing microphone: ${error}`);
+                    startBtn.disabled = false;
+                    stopBtn.disabled = true;
                 });
         }
 
