@@ -10,6 +10,8 @@ from pydub import AudioSegment
 import io
 import base64
 
+from rich import print
+
 load_dotenv()
 
 app = FastAPI()
@@ -90,8 +92,16 @@ async def forward_messages(source, destination):
                 message = await source.receive_text()
             else:
                 message = await source.recv()
+                
+            data = json.loads(message)
+            print(f"[green]Received message: {data}[/green]")
+            if data.get("type") == "input_audio_buffer.append":
+                audio_data = data["audio"]
+                processed_audio = process_audio(audio_data)
+                data["data"] = processed_audio
+                message = json.dumps(data)
             
-            print(f"Forwarding message: {message}")
+            print(f"[red]Forwarding message: {message}[/red]")
             
             if isinstance(destination, WebSocket):
                 await destination.send_text(message)
@@ -101,6 +111,8 @@ async def forward_messages(source, destination):
         print("WebSocket disconnected")
     except Exception as e:
         print(f"Error in forward_messages: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 @app.websocket("/ws/openai")
 async def websocket_endpoint(websocket: WebSocket):
