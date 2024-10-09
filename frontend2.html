@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI Realtime Audio Streaming</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #messageLog { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; }
+        button { padding: 5px 10px; margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <h1>OpenAI Realtime Audio Streaming</h1>
+    <div id="messageLog"></div>
+    <button id="startRecording">Start Recording</button>
+    <button id="stopRecording" disabled>Stop Recording</button>
+    <audio id="audioPlayback" controls style="display:none;"></audio>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+    <script>
+        const socket = new WebSocket('ws://localhost:8000/ws/openai');
+        const messageLog = document.getElementById('messageLog');
+        const startRecordingButton = document.getElementById('startRecording');
+        const stopRecordingButton = document.getElementById('stopRecording');
+        const audioPlayback = document.getElementById('audioPlayback');
+
+        let mediaRecorder;
+        let audioContext;
+        let audioChunks = [];
+        let mp3Encoder;
+
+        socket.onopen = function(e) {
+            addMessage('Connected to server');
+            socket.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                    modalities: ['text', 'audio'],
+                    instructions: 'You are a helpful hotel assistant. Help user book a room.',
+                }
+            }));
+        };
+
+        socket.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            addMessage('Received: ' + JSON.stringify(data, null, 2));
+            
+            if (data.type === 'conversation.item.create' && data.item.content[0].type === 'audio') {
+                playAudio(data.item.content[0].audio);
+            }
+        };
+
+        socket.onclose = function(event) {
+            addMessage('Disconnected from server');
+        };
+
+        socket.onerror = function(error) {
+            addMessage('Error: ' + error.message);
+        };
+
+        startRecordingButton.onclick = startRecording;
+        stopRecordingButton.onclick = stopRecording;
+
+        async function startRecording() {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(stream);
+            const processor = audioContext.createScriptProcessor(1024, 1, 1);
+
+            mp3Encoder = new lamejs.Mp3Encoder(1, 24000, 128);
+
+            source.connect(processor);
+            processor.connect(audioContext.destination);
+
+            processor.onaudioprocess = function(e) {
+                const buffer = e.inputBuffer.getChannelData(0);
+                const mp3Buffer = mp3Encoder.encodeBuffer(convertFloat32ToInt16(buffer));
+                if (mp3Buffer.length > 0) {
+                    audioChunks.push(mp3Buffer);
+                }
+            };
+
+            startRecordingButton.disabled = true;
+            stopRecordingButton.disabled = false;
+            addMessage('Started recording');
+        }
+
+        function stopRecording() {
+            const mp3Buffer = mp3Encoder.flush();
+            if (mp3Buffer.length > 0) {
+                audioChunks.push(mp3Buffer);
+            }
+
+            const blob = new Blob(audioChunks, { type: 'audio/mp3' });
+            sendAudioToServer(blob);
+
+            startRecordingButton.disabled = false;
+            stopRecordingButton.disabled = true;
+            addMessage('Stopped recording');
+        }
+
+        async function sendAudioToServer(blob) {
+            const arrayBuffer = await blob.arrayBuffer();
+            const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(arrayBuffer)));
+
+            socket.send(JSON.stringify({
+                type: 'input_audio_buffer.append',
+                audio: base64Audio
+            }));
+
+            socket.send(JSON.stringify({ type: 'input_audio_buffer.commit' }));
+            socket.send(JSON.stringify({ type: 'response.create' }));
+
+            audioChunks = [];
+        }
+
+        function convertFloat32ToInt16(buffer) {
+            const l = buffer.length;
+            const buf = new Int16Array(l);
+            while (l--) {
+                buf[l] = Math.min(1, buffer[l]) * 0x7FFF;
+            }
+            return buf;
+        }
+
+        function playAudio(base64Audio) {
+            const audioData = atob(base64Audio);
+            const audioArray = new Uint8Array(audioData.length);
+            for (let i = 0; i < audioData.length; i++) {
+                audioArray[i] = audioData.charCodeAt(i);
+            }
+            const blob = new Blob([audioArray], { type: 'audio/mp3' });
+            const url = URL.createObjectURL(blob);
+            audioPlayback.src = url;
+            audioPlayback.style.display = 'block';
+            audioPlayback.play();
+        }
+
+        function addMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messageLog.appendChild(messageElement);
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+    </script>
+</body>
+</html>
