@@ -24,34 +24,14 @@ function App() {
 
   // Start recording function
   const startRecording = () => {
-    navigator.mediaDevices.getUserMedia({ audio: true })
+    navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
       .then((stream) => {
-        setMicrophoneStream(stream);
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const newAudioContext = new AudioContext();
-        setAudioContext(newAudioContext);
-
-        const source = newAudioContext.createMediaStreamSource(stream);
-        const newProcessor = newAudioContext.createScriptProcessor(1024, 1, 1);
-
-        source.connect(newProcessor);
-        newProcessor.connect(newAudioContext.destination);
-
-        newProcessor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0);
-          const downsampledData = downsampleAudio(inputData, newAudioContext.sampleRate, 24000);
-          const base64Audio = base64EncodeAudio(downsampledData);
-          if (socket && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({
-              type: 'input_audio_buffer.append',
-              audio: base64Audio,
-            }));
-          }
-        };
-
-        setProcessor(newProcessor);
-        setIsRecording(true);
-
         // Connect to the backend WebSocket
         const newSocket = new WebSocket('ws://localhost:8000/ws/audio');
 
@@ -68,6 +48,36 @@ function App() {
         newSocket.onmessage = handleServerMessage;
 
         setSocket(newSocket);
+
+        setMicrophoneStream(stream);
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const newAudioContext = new AudioContext();
+        setAudioContext(newAudioContext);
+
+        const source = newAudioContext.createMediaStreamSource(stream);
+        const newProcessor = newAudioContext.createScriptProcessor(1024, 1, 1);
+
+        source.connect(newProcessor);
+        newProcessor.connect(newAudioContext.destination);
+
+        newProcessor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const downsampledData = downsampleAudio(inputData, newAudioContext.sampleRate, 24000);
+          const base64Audio = base64EncodeAudio(downsampledData);
+          if (newSocket && newSocket.readyState === WebSocket.OPEN) {
+            console.log("INPUT DATA", {
+              type: 'input_audio_buffer.append',
+              audio: base64Audio,
+            });
+            newSocket.send(JSON.stringify({
+              type: 'input_audio_buffer.append',
+              audio: base64Audio,
+            }));
+          }
+        };
+
+        setProcessor(newProcessor);
+        setIsRecording(true);
       })
       .catch((error) => {
         log(`Error accessing microphone: ${error.message}`);
