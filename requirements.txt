@@ -1,0 +1,4 @@
+uvicorn
+rich
+fastapi
+websockets
